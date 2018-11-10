@@ -29,6 +29,9 @@ import vpp_papi
 L2_VTR_POP_1 = 3
 L2_VTR_DISABLED = 0
 NO_BVI_SET = 4294967295
+VPP_VERSION_1807 = 1807
+VPP_VERSION_1810 = 1810
+VPP_VERSION_UNKNOWN = 0000
 
 
 def mac_to_bytes(mac):
@@ -235,6 +238,35 @@ class VPPInterface(object):
 
         self._vpp.connect("python-VPPInterface",
                           **args)
+        v = self.get_version()
+        if v.startswith('18.10'):
+            self.version = VPP_VERSION_1810
+        elif v.startswith('18.07'):
+            self.version = VPP_VERSION_1807
+        else:
+            self.version = VPP_VERSION_UNKNOWN
+            self.LOG.info('VPP Version unknwon: %s', v)
+
+    """ in VPP 18.10, the parameter bvi has been renamed to 'port_type'
+        for the function 'sw_interface_set_l2_bridge'.
+        Let's remove the unwanted parameter
+        according to the api microversion or vpp version.
+    """
+    _params_map = {
+        'sw_interface_set_l2_bridge': {
+            'min_version': VPP_VERSION_1810,
+            'new_params': ['port_type'],
+            'old_params': ['bvi']}
+        }
+
+    def _ensure_param_validity(self, func, kwargs):
+        if func in self._params_map:
+            if self.version >= self._params_map[func]['min_version']:
+                for p in self._params_map[func]['old_params']:
+                    del kwargs[p]
+            else:
+                for p in self._params_map[func]['new_params']:
+                    del kwargs[p]
 
     def call_vpp(self, func, *args, **kwargs):
         # Disabling to prevent message debug flooding
@@ -256,6 +288,7 @@ class VPPInterface(object):
             # self.LOG.debug(e)
 
         try:
+            self._ensure_param_validity(func, kwargs)
             t = func_call(*args, **kwargs)
         except IOError as e:
             self.LOG.exception(e)
